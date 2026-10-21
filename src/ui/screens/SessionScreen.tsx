@@ -146,9 +146,9 @@ export function SessionScreen({ id }: { id: string }) {
           </>
         )}
 
-        {editing && (
+        {(editing || live) && (
           <button className="btn block danger" style={{ marginTop: 24 }} onClick={() => setConfirmDelete(true)}>
-            Borrar entrenamiento
+            {live ? 'Descartar entrenamiento' : 'Borrar entrenamiento'}
           </button>
         )}
       </div>
@@ -167,12 +167,21 @@ export function SessionScreen({ id }: { id: string }) {
       {confirmFinish && (
         <Confirm
           title="¿Terminar entrenamiento?"
-          message={`${doneCount} ${doneCount === 1 ? 'serie palomeada' : 'series palomeadas'}. Las series sin palomear no se guardan.`}
+          message={
+            doneCount === 0
+              ? 'No palomeaste ninguna serie, así que no se guarda nada.'
+              : `${doneCount} ${doneCount === 1 ? 'serie palomeada' : 'series palomeadas'}. Las series sin palomear no se guardan.`
+          }
           confirmLabel="Terminar"
           onClose={() => setConfirmFinish(false)}
           onConfirm={async () => {
-            await finishSession(session);
             stopRest();
+            if (doneCount === 0) {
+              await deleteSession(session);
+              navigate('', { replace: true });
+              return;
+            }
+            await finishSession(session);
             window.scrollTo(0, 0);
             toast('¡Buen entrenamiento! 💪');
           }}
@@ -180,14 +189,15 @@ export function SessionScreen({ id }: { id: string }) {
       )}
       {confirmDelete && (
         <Confirm
-          title="¿Borrar este entrenamiento?"
-          message="Se borran todas sus series. No se puede deshacer."
-          confirmLabel="Borrar"
+          title={live ? '¿Descartar este entrenamiento?' : '¿Borrar este entrenamiento?'}
+          message={live && doneCount === 0 ? 'No tiene series registradas, así que no se pierde nada.' : 'Se borran todas sus series. No se puede deshacer.'}
+          confirmLabel={live ? 'Descartar' : 'Borrar'}
           danger
           onClose={() => setConfirmDelete(false)}
           onConfirm={async () => {
+            stopRest();
             await deleteSession(session);
-            navigate('historial', { replace: true });
+            navigate(live ? '' : 'historial', { replace: true });
           }}
         />
       )}

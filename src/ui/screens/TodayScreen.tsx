@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { db } from '../../db/db';
-import type { Routine } from '../../db/types';
-import { startSession, useExercises, useOpenSession, useReviewEntries, useRoutines, useSessionList } from '../../lib/data';
+import type { Routine, Session } from '../../db/types';
+import { deleteSession, startSession, useExercises, useOpenSession, useReviewEntries, useRoutines, useSessionList } from '../../lib/data';
 import { capitalize, formatLong, relativeDays, todayISO, WEEKDAY_NAMES, weekdayOf } from '../../lib/dates';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { Confirm } from '../components';
 import { IconChevronRight, IconWarn } from '../icons';
 import { navigate } from '../router';
 import { SyncPill } from '../SyncPill';
@@ -50,7 +51,7 @@ export function TodayScreen() {
       )}
 
       {open ? (
-        <OpenSessionCard sessionId={open.id} title={open.title} />
+        <OpenSessionCard session={open} />
       ) : (
         <>
           {doneToday && (
@@ -122,20 +123,34 @@ function RoutineHero({ routine, last, onStart }: { routine: Routine; last?: stri
   );
 }
 
-function OpenSessionCard({ sessionId, title }: { sessionId: string; title: string }) {
+function OpenSessionCard({ session }: { session: Session }) {
+  const [confirm, setConfirm] = useState(false);
   const stats = useLiveQuery(async () => {
-    const sets = (await db.sets.where('sessionId').equals(sessionId).toArray()).filter((s) => s.deleted !== 1 && s.done === 1);
+    const sets = (await db.sets.where('sessionId').equals(session.id).toArray()).filter((s) => s.deleted !== 1 && s.done === 1);
     return { sets: sets.length, exercises: new Set(sets.map((s) => s.entryId)).size };
-  }, [sessionId]);
+  }, [session.id]);
   return (
     <div className="card card-hero" style={{ marginTop: 12 }}>
-      <div style={{ fontWeight: 650, fontSize: 18 }}>{title}</div>
+      <div style={{ fontWeight: 650, fontSize: 18 }}>{session.title}</div>
       <div className="muted small" style={{ margin: '4px 0 14px' }}>
         {stats ? `${stats.exercises} ejercicios · ${stats.sets} series hasta ahora` : ' '}
       </div>
-      <button className="btn primary block big" onClick={() => navigate(`sesion/${sessionId}`)}>
+      <button className="btn primary block big" onClick={() => navigate(`sesion/${session.id}`)}>
         Continuar
       </button>
+      <button className="btn ghost block" style={{ marginTop: 6 }} onClick={() => setConfirm(true)}>
+        Descartar
+      </button>
+      {confirm && (
+        <Confirm
+          title="¿Descartar este entrenamiento?"
+          message={stats?.sets ? `Se borran las ${stats.sets} series que llevas.` : 'No tiene series registradas, así que no se pierde nada.'}
+          confirmLabel="Descartar"
+          danger
+          onClose={() => setConfirm(false)}
+          onConfirm={() => deleteSession(session)}
+        />
+      )}
     </div>
   );
 }

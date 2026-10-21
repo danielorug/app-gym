@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../db/db';
 import type { Entry, Exercise, Routine, RoutineSlot, Session, WorkSet } from '../db/types';
-import { finishSession, lastTimeFor, mergeExercises, startSession } from './data';
+import { closeStaleSessions, finishSession, lastTimeFor, mergeExercises, startSession } from './data';
 
 const T = 1_700_000_000_000;
 const ex = (id: string, name: string, unit: 'kg' | 'lb' = 'kg'): Exercise => ({ id, name, unit, load: 'normal', notes: '', archived: 0, createdAt: T, updatedAt: T, deleted: 0 });
@@ -96,6 +96,30 @@ describe('finishSession', () => {
     await finishSession({ ...s3, finishedAt: null });
     expect((await db.sets.get('x'))?.deleted).toBe(1);
     expect((await db.sets.get('d'))?.deleted).toBe(0);
+  });
+});
+
+describe('closeStaleSessions', () => {
+  it('borra los vacíos de días pasados, termina los que tienen series y respeta el de hoy', async () => {
+    const now = new Date(2026, 9, 21, 8, 0).getTime();
+    const open = (id: string, date: string, startedAt: number): Session => ({ ...session(id, date), source: 'app', finishedAt: null, startedAt });
+    await db.sessions.bulkPut([open('vacio', '2026-10-20', now - 20 * 3_600_000), open('conSeries', '2026-10-19', now - 40 * 3_600_000), open('hoy', '2026-10-21', now - 600_000)]);
+    const e = entry('ev', 'conSeries', 'ex-banca');
+    await db.entries.put(e);
+    await db.sets.bulkPut([set('ok', e, '2026-10-19', 0, 25, 6), set('pend', e, '2026-10-19', 1, 25, 6, 0)]);
+
+    expect(await closeStaleSessions('2026-10-21', now)).toBe(2);
+    expect((await db.sessions.get('vacio'))?.deleted).toBe(1);
+    expect((await db.sessions.get('conSeries'))?.finishedAt).toBeTruthy();
+    expect((await db.sets.get('pend'))?.deleted).toBe(1);
+    expect((await db.sets.get('ok'))?.deleted).toBe(0);
+    expect((await db.sessions.get('hoy'))?.finishedAt).toBeNull();
+  });
+
+  it('respeta uno empezado ayer hace menos de 6 h (entrenar pasada la medianoche)', async () => {
+    const now = new Date(2026, 9, 21, 0, 30).getTime();
+    await db.sessions.put({ ...session('noche', '2026-10-20'), source: 'app', finishedAt: null, startedAt: now - 3_600_000 });
+    expect(await closeStaleSessions('2026-10-21', now)).toBe(0);
   });
 });
 

@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { closeStaleSessions } from '../lib/data';
 import { startAutoSync } from '../sync/sync';
 import { ToastHost } from './components';
 import { IconCalendar, IconDumbbell, IconList, IconMore } from './icons';
@@ -28,6 +29,11 @@ export function App() {
     startAutoSync();
     // Pedir almacenamiento persistente para que iOS no borre la base local.
     void navigator.storage?.persist?.();
+    // Un entrenamiento de otro día que quedó abierto no debe bloquear el de hoy.
+    void closeStaleSessions();
+    const onVisible = () => document.visibilityState === 'visible' && void closeStaleSessions();
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
 
   let screen;

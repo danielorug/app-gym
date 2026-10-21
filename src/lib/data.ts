@@ -188,6 +188,23 @@ export function useOpenSession(): Session | null | undefined {
   }, []);
 }
 
+/**
+ * Entrenamientos de días pasados que quedaron abiertos (ej. le diste "Empezar" para probar):
+ * si tienen series palomeadas se terminan; si están vacíos se borran. Así nunca bloquean el día de hoy.
+ * Uno empezado hace menos de 6 h se respeta, por si entrenas pasada la medianoche.
+ */
+export async function closeStaleSessions(today = todayISO(), now = Date.now()): Promise<number> {
+  const stale = (await db.sessions.where('date').below(today).toArray()).filter(
+    (s) => alive(s) && s.source === 'app' && !s.finishedAt && (s.startedAt == null || now - s.startedAt > 6 * 3_600_000),
+  );
+  for (const s of stale) {
+    const hasDone = (await db.sets.where('sessionId').equals(s.id).toArray()).some((x) => alive(x) && x.done === 1);
+    if (hasDone) await finishSession(s);
+    else await deleteSession(s);
+  }
+  return stale.length;
+}
+
 export function useReviewEntries(): Entry[] | undefined {
   return useLiveQuery(async () => (await db.entries.where('review').equals(1).toArray()).filter(alive), []);
 }
