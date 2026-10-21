@@ -1,0 +1,7 @@
+node_modules
+dist
+dev-dist
+.DS_Store
+# Datos personales importados de Notas (no subir a ningún lado)
+importado/
+.claude/
