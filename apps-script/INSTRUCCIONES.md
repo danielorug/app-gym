@@ -21,7 +21,7 @@ La app funciona sin internet: guarda todo en el teléfono y lo sube a la hoja cu
 
 ## 3. Correr "configurar" (crea las pestañas y tu token)
 
-1. En la barra de arriba del editor hay un menú con nombres de funciones. Elige **configurar**.
+1. En la barra de arriba del editor (junto a *Depurar*) hay un menú con nombres de funciones. Elige **configurar**. Ojo: si dice *onOpen* u otra, cámbiala; esa no muestra el token.
 2. Presiona **▶ Ejecutar**.
 3. Google pide permiso la primera vez:
    - **Revisar permisos** → elige tu cuenta.

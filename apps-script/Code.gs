@@ -55,14 +55,6 @@ var RESUMEN = 'Resumen';
 // Para ti (desde el editor o el menú "App Gym")
 // ---------------------------------------------------------------------------
 
-function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('App Gym')
-    .addItem('Configurar / ver token', 'configurar')
-    .addItem('Generar token nuevo', 'nuevoToken')
-    .addToUi();
-}
-
 /** Crea las pestañas y el token. Se puede correr varias veces sin borrar nada. */
 function configurar() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -73,6 +65,14 @@ function configurar() {
   if (!token) token = guardarTokenNuevo_();
   mostrarToken_(token);
   return token;
+}
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('App Gym')
+    .addItem('Configurar / ver token', 'configurar')
+    .addItem('Generar token nuevo', 'nuevoToken')
+    .addToUi();
 }
 
 /** Cambia el token (la app dejará de conectarse hasta que pegues el nuevo). */
