@@ -27,7 +27,7 @@ import { AutoSaveText, Confirm, Segmented, Sheet, Topbar, toast } from '../compo
 import { ExercisePicker } from '../ExercisePicker';
 import { IconCheck, IconMore, IconPlus, IconTrophy } from '../icons';
 import { usePrefs } from '../prefs';
-import { startRest, stopRest } from '../rest';
+import { primeAudio, startRest, stopRest } from '../rest';
 import { navigate } from '../router';
 
 export function SessionScreen({ id }: { id: string }) {
@@ -543,6 +543,14 @@ function SetRow({
     if (!focused.current) setTexts(textsFrom(set));
   }, [set?.id, set?.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Las filas van por posición: si se borra una serie de arriba, esta fila pasa a mostrar otra.
+  // Los ajustes temporales (unidad, "/", tiempo) eran de la serie anterior, así que se limpian.
+  const prevSetId = useRef(set?.id);
+  useEffect(() => {
+    if (prevSetId.current && prevSetId.current !== set?.id) setExtra({});
+    prevSetId.current = set?.id;
+  }, [set?.id]);
+
   const current = set ?? created.current ?? undefined;
   const unit: Unit = extra.unit ?? current?.unit ?? source?.unit ?? exercise.unit;
   const load: LoadMode = extra.load ?? current?.load ?? source?.load ?? exercise.load;
@@ -601,6 +609,7 @@ function SetRow({
 
   const toggleDone = async () => {
     if (!editable) return;
+    primeAudio(); // tiene que ir antes de cualquier await (regla de iOS)
     if (done) {
       await persist(texts, 0);
       return;

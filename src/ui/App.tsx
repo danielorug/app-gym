@@ -31,7 +31,11 @@ export function App() {
     void navigator.storage?.persist?.();
     // Un entrenamiento de otro día que quedó abierto no debe bloquear el de hoy.
     void closeStaleSessions();
-    const onVisible = () => document.visibilityState === 'visible' && void closeStaleSessions();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void closeStaleSessions();
+      // Al bloquear el cel o salir de la app con un número a medio escribir, guardarlo (se guarda al salir del campo).
+      else (document.activeElement as HTMLElement | null)?.blur?.();
+    };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);

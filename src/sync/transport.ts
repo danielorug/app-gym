@@ -58,35 +58,48 @@ export function validateUrl(url: string): string | null {
   return null;
 }
 
+/** Con señal mala (el gym) una petición puede quedarse colgada; sin límite, la sincronización se trababa. */
+export const REQUEST_TIMEOUT_MS = 60_000;
+
 export async function callApi<R extends ApiRequest>(cfg: SyncConfig, req: R): Promise<ResponseFor<R>> {
   const urlError = validateUrl(cfg.url);
   if (urlError) throw new SyncError('badurl', urlError);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const slow = () => new SyncError('offline', 'Conexión muy lenta; se reintentará después');
   let res: Response;
-  try {
-    res = await fetch(cfg.url.trim(), {
-      method: 'POST',
-      // text/plain evita el "preflight" de CORS, que Apps Script no contesta.
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ ...req, token: cfg.token.trim() }),
-      redirect: 'follow',
-    });
-  } catch {
-    if (isOffline()) throw new SyncError('offline', 'Sin conexión');
-    throw new SyncError(
-      'badurl',
-      'No se pudo conectar con Google Sheets. Revisa la URL y que el acceso de la implementación sea "Cualquier persona".',
-    );
-  }
-  if (!res.ok) throw new SyncError('badurl', `La URL no responde como App Gym (error ${res.status})`);
-
   let data: unknown;
   try {
-    data = await res.json();
-  } catch {
-    throw new SyncError(
-      'badurl',
-      'La URL no responde como App Gym. ¿Copiaste la URL que termina en /exec y el acceso es "Cualquier persona"?',
-    );
+    try {
+      res = await fetch(cfg.url.trim(), {
+        method: 'POST',
+        // text/plain evita el "preflight" de CORS, que Apps Script no contesta.
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ ...req, token: cfg.token.trim() }),
+        redirect: 'follow',
+        signal: controller.signal,
+      });
+    } catch {
+      if (controller.signal.aborted) throw slow();
+      if (isOffline()) throw new SyncError('offline', 'Sin conexión');
+      throw new SyncError(
+        'badurl',
+        'No se pudo conectar con Google Sheets. Revisa la URL y que el acceso de la implementación sea "Cualquier persona".',
+      );
+    }
+    if (!res.ok) throw new SyncError('badurl', `La URL no responde como App Gym (error ${res.status})`);
+
+    try {
+      data = await res.json();
+    } catch {
+      if (controller.signal.aborted) throw slow();
+      throw new SyncError(
+        'badurl',
+        'La URL no responde como App Gym. ¿Copiaste la URL que termina en /exec y el acceso es "Cualquier persona"?',
+      );
+    }
+  } finally {
+    clearTimeout(timer);
   }
   if (!data || typeof data !== 'object' || !('ok' in data)) {
     throw new SyncError('badurl', 'La URL no responde como App Gym');

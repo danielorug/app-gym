@@ -35,16 +35,22 @@ function emit() {
   listeners.forEach((l) => l());
 }
 
-/** Llamar desde un toque del usuario (iOS solo permite sonido después de un gesto). */
-export function startRest(label: string, seconds = getPrefs().restSeconds) {
-  if (getPrefs().restSound) {
-    try {
-      audio ??= new AudioContext();
-      void audio.resume();
-    } catch {
-      audio = null;
-    }
+/**
+ * iOS solo deja activar el sonido dentro del toque mismo (antes de cualquier `await`).
+ * Llamar al inicio del manejador del clic; después ya se puede sonar en cualquier momento.
+ */
+export function primeAudio() {
+  if (!getPrefs().restSound) return;
+  try {
+    audio ??= new AudioContext();
+    void audio.resume();
+  } catch {
+    audio = null;
   }
+}
+
+export function startRest(label: string, seconds = getPrefs().restSeconds) {
+  primeAudio();
   beeped = false;
   state = { endsAt: Date.now() + seconds * 1000, total: seconds, label };
   emit();
