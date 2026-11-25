@@ -2,10 +2,10 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../db/db';
 import type { Entry, Exercise, Routine, RoutineSlot, Session, WorkSet } from '../db/types';
-import { closeStaleSessions, finishSession, lastTimeFor, mergeExercises, startSession } from './data';
+import { addSlot, closeStaleSessions, saveEntryOrder, finishSession, lastTimeFor, makeUnilateralVariant, mergeExercises, startSession } from './data';
 
 const T = 1_700_000_000_000;
-const ex = (id: string, name: string, unit: 'kg' | 'lb' = 'kg'): Exercise => ({ id, name, unit, load: 'normal', notes: '', archived: 0, createdAt: T, updatedAt: T, deleted: 0 });
+const ex = (id: string, name: string, unit: 'kg' | 'lb' = 'kg'): Exercise => ({ id, name, unit, load: 'normal', notes: '', archived: 0, unilateral: 0, createdAt: T, updatedAt: T, deleted: 0 });
 const session = (id: string, date: string): Session => ({ id, date, routineId: null, title: 'x', notes: '', startedAt: T, finishedAt: T, source: 'notas', updatedAt: T, deleted: 0 });
 const entry = (id: string, sessionId: string, exerciseId: string, note = ''): Entry => ({
   id,
@@ -31,6 +31,7 @@ const set = (id: string, e: Entry, date: string, order: number, weight: number, 
   unit: 'kg',
   load: 'normal',
   reps,
+  repsR: null,
   weight2: null,
   reps2: null,
   seconds: null,
@@ -130,5 +131,52 @@ describe('mergeExercises', () => {
     expect((await db.sets.get('a'))?.exerciseId).toBe('ex-conv');
     expect((await db.entries.get('e1'))?.exerciseId).toBe('ex-conv');
     expect((await db.exercises.get('ex-banca'))?.deleted).toBe(1);
+  });
+});
+
+describe('makeUnilateralVariant', () => {
+  it('crea la variante unilateral, la agrega al lugar de la rutina y la usa hoy; la segunda vez la reutiliza', async () => {
+    const slot: RoutineSlot = { id: 'slu', routineId: 'rt', order: 0, exerciseIds: ['ex-conv'], kind: 'normal', updatedAt: T, deleted: 0 };
+    await db.slots.put(slot);
+    const e = entry('eu', 's3', 'ex-conv');
+    await db.entries.put(e);
+    const conv = (await db.exercises.get('ex-conv'))!;
+
+    const v = await makeUnilateralVariant(e, conv, slot);
+    expect(v.name).toBe('Converging Chest Press unilateral');
+    expect(v.unilateral).toBe(1);
+    expect(v.notes).toBe(conv.notes);
+    expect((await db.slots.get('slu'))?.exerciseIds).toEqual(['ex-conv', v.id]);
+    expect((await db.entries.get('eu'))?.exerciseId).toBe(v.id);
+
+    const again = await makeUnilateralVariant(e, conv, (await db.slots.get('slu'))!);
+    expect(again.id).toBe(v.id);
+    expect((await db.exercises.toArray()).filter((x) => x.name === v.name)).toHaveLength(1);
+  });
+});
+
+describe('addSlot', () => {
+  it('agrega un ejercicio a la rutina como opcional, al final', async () => {
+    await db.slots.put({ id: 'sl0', routineId: 'rt2', order: 0, exerciseIds: ['ex-banca'], kind: 'normal', updatedAt: T, deleted: 0 });
+    const slot = await addSlot('rt2', 'ex-conv', 'opcional');
+    expect(slot.kind).toBe('opcional');
+    expect(slot.order).toBe(1);
+  });
+});
+
+describe('saveEntryOrder', () => {
+  it('reordena el entrenamiento y, si se pide, la rutina (los lugares que no se hicieron se quedan en su puesto)', async () => {
+    const mk = (id: string, order: number, kind: RoutineSlot['kind'] = 'normal'): RoutineSlot => ({ id, routineId: 'rto', order, exerciseIds: [`ex-${id}`], kind, updatedAt: T, deleted: 0 });
+    const slots = [mk('a', 0), mk('b', 1), mk('no', 2, 'no'), mk('c', 3)];
+    await db.slots.bulkPut(slots);
+    const en = (id: string, slotId: string, order: number): Entry => ({ ...entry(id, 'sx', `ex-${slotId}`), slotId, order });
+    const entries = [en('ea', 'a', 0), en('eb', 'b', 1), en('ec', 'c', 2)];
+    await db.entries.bulkPut(entries);
+    // Hoy: c, a, b
+    await saveEntryOrder([entries[2], entries[0], entries[1]], slots);
+    const order = (await db.slots.where('routineId').equals('rto').toArray()).sort((x, y) => x.order - y.order).map((s) => s.id);
+    expect(order).toEqual(['c', 'a', 'no', 'b']);
+    const eorder = (await db.entries.where('sessionId').equals('sx').toArray()).sort((x, y) => x.order - y.order).map((e) => e.id);
+    expect(eorder).toEqual(['ec', 'ea', 'eb']);
   });
 });

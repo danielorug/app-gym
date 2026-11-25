@@ -3,7 +3,10 @@ import type { LoadMode, Unit, WorkSet } from '../db/types';
 /** Peso de la barra olímpica. */
 export const BAR_WEIGHT: Record<Unit, number> = { kg: 20, lb: 45 };
 
-export type SetLike = Pick<WorkSet, 'weight' | 'unit' | 'load' | 'reps' | 'weight2' | 'reps2' | 'seconds'>;
+export type SetLike = Pick<WorkSet, 'weight' | 'unit' | 'load' | 'reps' | 'weight2' | 'reps2' | 'seconds'> & {
+  /** Unilaterales: reps del lado derecho (`reps` = izquierdo). Opcional para datos viejos. */
+  repsR?: number | null;
+};
 
 /** Acepta "17,5" (teclado de iPhone en español) y "17.5". */
 export function parseNum(text: string): number | null {
@@ -38,10 +41,23 @@ export function formatWeight(s: Pick<SetLike, 'weight' | 'unit' | 'load' | 'weig
   return `${fmtNum(s.weight)}${second} ${u}`;
 }
 
-export function formatReps(s: Pick<SetLike, 'reps' | 'reps2' | 'seconds'>): string {
+export function formatReps(s: Pick<SetLike, 'reps' | 'reps2' | 'seconds' | 'repsR'>): string {
   if (s.seconds != null && s.reps == null) return formatSeconds(s.seconds);
-  if (s.reps == null) return '—';
-  return s.reps2 != null ? `${fmtNum(s.reps)}/${fmtNum(s.reps2)}` : fmtNum(s.reps);
+  if (s.reps == null && s.repsR == null) return '—';
+  let main: string;
+  if (s.repsR != null) {
+    // Unilateral: "9 por lado" si salieron iguales, "9 izq, 8 der" si no.
+    main = s.reps === s.repsR ? `${fmtNum(s.repsR)} por lado` : `${s.reps == null ? '—' : fmtNum(s.reps)} izq, ${fmtNum(s.repsR)} der`;
+  } else {
+    main = fmtNum(s.reps!);
+  }
+  return s.reps2 != null ? `${main}/${fmtNum(s.reps2)}` : main;
+}
+
+/** Reps que cuentan para comparar: en unilaterales, el lado más débil. */
+export function effectiveReps(s: Pick<SetLike, 'reps' | 'repsR'>): number {
+  if (s.repsR != null) return Math.min(s.reps ?? 0, s.repsR);
+  return s.reps ?? 0;
 }
 
 export function formatSeconds(sec: number): string {
@@ -63,6 +79,7 @@ function sameSet(a: SetLike, b: SetLike): boolean {
     a.unit === b.unit &&
     a.load === b.load &&
     a.reps === b.reps &&
+    (a.repsR ?? null) === (b.repsR ?? null) &&
     (a.weight2 ?? null) === (b.weight2 ?? null) &&
     (a.reps2 ?? null) === (b.reps2 ?? null) &&
     (a.seconds ?? null) === (b.seconds ?? null)
@@ -118,8 +135,8 @@ export function compareSets(a: SetLike, b: SetLike): number {
   const wa = toKg(effectiveWeight(a), a.unit);
   const wb = toKg(effectiveWeight(b), b.unit);
   if (Math.abs(wa - wb) > 0.01) return wa - wb;
-  const ra = a.reps ?? 0;
-  const rb = b.reps ?? 0;
+  const ra = effectiveReps(a);
+  const rb = effectiveReps(b);
   if (ra !== rb) return ra - rb;
   return (a.seconds ?? 0) - (b.seconds ?? 0);
 }
@@ -127,7 +144,7 @@ export function compareSets(a: SetLike, b: SetLike): number {
 export function bestSet<S extends SetLike>(sets: S[]): S | null {
   let best: S | null = null;
   for (const s of sets) {
-    if (s.reps == null && s.seconds == null) continue;
+    if (s.reps == null && s.repsR == null && s.seconds == null) continue;
     if (!best || compareSets(s, best) > 0) best = s;
   }
   return best;

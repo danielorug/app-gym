@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { formatClock } from '../lib/dates';
 import { IconTimer, IconX } from './icons';
-import { getPrefs } from './prefs';
+import { getPrefs, restSoundOn } from './prefs';
 
 // Temporizador de descanso. Se guarda la hora de término (no un contador),
 // así sigue siendo correcto aunque el iPhone pause la app en segundo plano.
@@ -40,7 +40,7 @@ function emit() {
  * Llamar al inicio del manejador del clic; después ya se puede sonar en cualquier momento.
  */
 export function primeAudio() {
-  if (!getPrefs().restSound) return;
+  if (!restSoundOn()) return;
   try {
     audio ??= new AudioContext();
     void audio.resume();
@@ -78,20 +78,47 @@ export function useRest(): RestState | null {
   );
 }
 
+type AudioSessionType = 'auto' | 'playback' | 'transient' | 'transient-solo' | 'ambient' | 'play-and-record';
+interface NavigatorWithAudioSession extends Navigator {
+  audioSession?: { type: AudioSessionType };
+}
+
 function beep() {
-  if (!audio || !getPrefs().restSound) return;
-  const t = audio.currentTime;
-  [0, 0.25, 0.5].forEach((offset) => {
+  if (!audio || !restSoundOn()) return;
+  // iPhone en silencio: "playback" hace que suene igual (Safari 16.4+). Solo durante el aviso,
+  // luego se regresa a "auto" para no quedarse con el control del audio del cel.
+  const session = getPrefs().forceSound ? (navigator as NavigatorWithAudioSession).audioSession : undefined;
+  if (session) {
+    try {
+      session.type = 'playback';
+    } catch {
+      /* no soportado */
+    }
+  }
+  void audio.resume();
+  const t = audio.currentTime + 0.05;
+  // Dos rondas de tres pitidos, para que se oiga en el gym.
+  [0, 0.22, 0.44, 1.1, 1.32, 1.54].forEach((offset) => {
     const osc = audio!.createOscillator();
     const gain = audio!.createGain();
-    osc.frequency.value = 880;
+    osc.type = 'square';
+    osc.frequency.value = 1046;
     gain.gain.setValueAtTime(0.0001, t + offset);
-    gain.gain.exponentialRampToValueAtTime(0.3, t + offset + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + offset + 0.18);
+    gain.gain.exponentialRampToValueAtTime(0.5, t + offset + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + offset + 0.16);
     osc.connect(gain).connect(audio!.destination);
     osc.start(t + offset);
-    osc.stop(t + offset + 0.2);
+    osc.stop(t + offset + 0.18);
   });
+  if (session) {
+    setTimeout(() => {
+      try {
+        session.type = 'auto';
+      } catch {
+        /* no soportado */
+      }
+    }, 2500);
+  }
 }
 
 export function RestBar() {

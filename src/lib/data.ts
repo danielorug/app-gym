@@ -1,7 +1,7 @@
 import Dexie from 'dexie';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, newId, remove, save } from '../db/db';
-import type { Entry, Exercise, LoadMode, Routine, RoutineSlot, Session, Unit, WorkSet } from '../db/types';
+import type { Entry, Exercise, LoadMode, Routine, RoutineSlot, Session, SlotKind, Unit, WorkSet } from '../db/types';
 import { todayISO } from './dates';
 import { bestSet } from './format';
 
@@ -113,6 +113,27 @@ export async function exerciseHistory(exerciseId: string): Promise<ExerciseHisto
 
 export function useExerciseHistory(exerciseId: string | undefined) {
   return useLiveQuery(async () => (exerciseId ? exerciseHistory(exerciseId) : []), [exerciseId]);
+}
+
+/** Historial de todos los ejercicios de una pasada (para la lista de Ejercicios). */
+export function useAllHistories(): Map<string, ExerciseHistoryItem[]> | undefined {
+  return useLiveQuery(async () => {
+    const byEx = new Map<string, Map<string, WorkSet[]>>();
+    await db.sets.each((s) => {
+      if (s.deleted === 1 || s.done !== 1) return;
+      const bySession = byEx.get(s.exerciseId) ?? new Map<string, WorkSet[]>();
+      bySession.set(s.sessionId, [...(bySession.get(s.sessionId) ?? []), s]);
+      byEx.set(s.exerciseId, bySession);
+    });
+    const out = new Map<string, ExerciseHistoryItem[]>();
+    for (const [exId, bySession] of byEx) {
+      out.set(
+        exId,
+        [...bySession.entries()].map(([sessionId, list]) => ({ sessionId, date: list[0].date, sets: list.sort((a, b) => a.order - b.order), note: '' })),
+      );
+    }
+    return out;
+  }, []);
 }
 
 export interface RecordInfo {
@@ -316,6 +337,7 @@ export interface SetValues {
   reps: number | null;
   unit: Unit;
   load: LoadMode;
+  repsR?: number | null;
   weight2?: number | null;
   reps2?: number | null;
   seconds?: number | null;
@@ -335,6 +357,7 @@ export async function addSet(entry: Entry, date: string, order: number, v: SetVa
     unit: v.unit,
     load: v.load,
     reps: v.reps,
+    repsR: v.repsR ?? null,
     weight2: v.weight2 ?? null,
     reps2: v.reps2 ?? null,
     seconds: v.seconds ?? null,
@@ -378,11 +401,52 @@ export async function deleteSession(session: Session): Promise<void> {
   await remove('sessions', [session.id]);
 }
 
-export async function createExercise(v: { name: string; unit: Unit; load: LoadMode; notes?: string }): Promise<Exercise> {
+export async function createExercise(v: { name: string; unit: Unit; load: LoadMode; notes?: string; unilateral?: 0 | 1 }): Promise<Exercise> {
   const now = Date.now();
-  const ex: Exercise = { ...base(), id: newId('ex-'), name: v.name.trim(), unit: v.unit, load: v.load, notes: v.notes ?? '', archived: 0, createdAt: now };
+  const ex: Exercise = {
+    ...base(),
+    id: newId('ex-'),
+    name: v.name.trim(),
+    unit: v.unit,
+    load: v.load,
+    notes: v.notes ?? '',
+    archived: 0,
+    unilateral: v.unilateral ?? 0,
+    createdAt: now,
+  };
   await save('exercises', ex);
   return ex;
+}
+
+/**
+ * Variante unilateral de un ejercicio ("Converging Shoulder Press unilateral"), con su propio historial
+ * y reps por lado. Si ya existe se reutiliza. Queda como variante del lugar de la rutina y se usa hoy.
+ */
+export async function makeUnilateralVariant(entry: Entry, exercise: Exercise, slot: RoutineSlot | undefined): Promise<Exercise> {
+  const name = `${exercise.name} unilateral`;
+  const all = (await db.exercises.toArray()).filter(alive);
+  let variant = all.find((e) => e.name.toLowerCase() === name.toLowerCase());
+  // Misma máquina: se copian sus notas (ajustes de asiento, agarre…).
+  if (!variant) variant = await createExercise({ name, unit: exercise.unit, load: exercise.load, notes: exercise.notes, unilateral: 1 });
+  else if (variant.unilateral !== 1 || variant.archived === 1) {
+    variant = { ...variant, unilateral: 1, archived: 0 };
+    await save('exercises', variant);
+  }
+  if (slot && !slot.exerciseIds.includes(variant.id)) await save('slots', { ...slot, exerciseIds: [...slot.exerciseIds, variant.id] });
+  await updateEntry(entry, { exerciseId: variant.id });
+  return variant;
+}
+
+/** Lugares de rutina donde aparece un ejercicio (para marcarlo opcional desde su ficha). */
+export function useSlotsForExercise(exerciseId: string | undefined) {
+  return useLiveQuery(async () => {
+    if (!exerciseId) return [];
+    const [slots, routines] = await Promise.all([db.slots.toArray(), db.routines.toArray()]);
+    const names = new Map(routines.filter(alive).map((r) => [r.id, r.name]));
+    return slots
+      .filter((s) => alive(s) && s.exerciseIds.includes(exerciseId) && names.has(s.routineId))
+      .map((slot) => ({ slot, routineName: names.get(slot.routineId)! }));
+  }, [exerciseId]);
 }
 
 export async function updateExercise(ex: Exercise, patch: Partial<Exercise>): Promise<void> {
@@ -425,7 +489,7 @@ export async function deleteRoutine(routine: Routine): Promise<void> {
   await remove('routines', [routine.id]);
 }
 
-export async function addSlot(routineId: string, exerciseId: string): Promise<void> {
+export async function addSlot(routineId: string, exerciseId: string, kind: SlotKind = 'normal'): Promise<RoutineSlot> {
   const slots = (await db.slots.where('routineId').equals(routineId).toArray()).filter(alive);
   const slot: RoutineSlot = {
     ...base(),
@@ -433,9 +497,10 @@ export async function addSlot(routineId: string, exerciseId: string): Promise<vo
     routineId,
     order: slots.reduce((m, s) => Math.max(m, s.order + 1), 0),
     exerciseIds: [exerciseId],
-    kind: 'normal',
+    kind,
   };
   await save('slots', slot);
+  return slot;
 }
 
 export async function updateSlot(slot: RoutineSlot, patch: Partial<RoutineSlot>): Promise<void> {
@@ -448,6 +513,28 @@ export async function updateSlot(slot: RoutineSlot, patch: Partial<RoutineSlot>)
 
 export async function removeSlot(slot: RoutineSlot): Promise<void> {
   await remove('slots', [slot.id]);
+}
+
+/** Guarda el orden de los lugares de una rutina tal como vienen en `list`. */
+export async function saveSlotOrder(list: RoutineSlot[]): Promise<void> {
+  const changed = list.map((s, i) => ({ ...s, order: i })).filter((s, i) => list[i].order !== s.order);
+  if (changed.length) await save('slots', changed);
+}
+
+/** Guarda el orden de los ejercicios de un entrenamiento; con `routineSlots`, aplica ese orden también a la rutina. */
+export async function saveEntryOrder(list: Entry[], routineSlots?: RoutineSlot[]): Promise<void> {
+  const changed = list.map((e, i) => ({ ...e, order: i })).filter((e, i) => list[i].order !== e.order);
+  if (changed.length) await save('entries', changed);
+  if (!routineSlots) return;
+  // Los lugares que aparecen hoy se acomodan en el orden de hoy, ocupando los mismos puestos;
+  // los que no aparecen (ej. "Fuera (NO)") se quedan donde estaban.
+  const sorted = [...routineSlots].sort((a, b) => a.order - b.order);
+  const todayIds = list.map((e) => e.slotId).filter((id): id is string => !!id && sorted.some((s) => s.id === id));
+  const unique = [...new Set(todayIds)];
+  const positions = sorted.map((s, i) => (unique.includes(s.id) ? i : -1)).filter((i) => i >= 0);
+  const next = [...sorted];
+  unique.forEach((id, k) => (next[positions[k]] = sorted.find((s) => s.id === id)!));
+  await saveSlotOrder(next);
 }
 
 export async function moveSlot(slots: RoutineSlot[], index: number, dir: -1 | 1): Promise<void> {

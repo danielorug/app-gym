@@ -30,6 +30,8 @@ export interface Exercise extends Base {
   /** Notas que se quedan: ajustes de máquina, técnica, metas. */
   notes: string;
   archived: Flag;
+  /** 1 = se registran reps de cada lado (izquierda y derecha). */
+  unilateral: Flag;
   createdAt: number;
 }
 
@@ -91,7 +93,9 @@ export interface WorkSet extends Base {
   weight: number | null;
   unit: Unit;
   load: LoadMode;
-  reps: number | null; // admite medias reps (5.5)
+  reps: number | null; // admite medias reps (5.5). En unilaterales = lado izquierdo
+  /** Unilaterales: reps del lado derecho (null = no aplica). */
+  repsR: number | null;
   /** Segunda parte de la serie con "/" (ej. juntos 32 kg × 8 / unilateral 18 kg × 4). */
   weight2: number | null;
   reps2: number | null;

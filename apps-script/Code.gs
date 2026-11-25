@@ -15,7 +15,7 @@
 var SCHEMA = {
   exercises: {
     sheet: 'Ejercicios',
-    cols: ['name', 'unit', 'load', 'notes', 'archived', 'createdAt', 'id', 'updatedAt', 'deleted'],
+    cols: ['name', 'unit', 'load', 'notes', 'archived', 'createdAt', 'id', 'updatedAt', 'deleted', 'unilateral'],
     text: ['name', 'unit', 'load', 'notes', 'id'],
   },
   routines: {
@@ -42,7 +42,7 @@ var SCHEMA = {
     sheet: 'Series',
     cols: [
       'date', 'ejercicio', 'order', 'weight', 'unit', 'load', 'reps', 'weight2', 'reps2', 'seconds', 'done', 'doubtful',
-      'entryId', 'sessionId', 'exerciseId', 'id', 'updatedAt', 'deleted',
+      'entryId', 'sessionId', 'exerciseId', 'id', 'updatedAt', 'deleted', 'repsR',
     ],
     text: ['date', 'ejercicio', 'unit', 'load', 'entryId', 'sessionId', 'exerciseId', 'id'],
   },

@@ -19,7 +19,7 @@ type FieldMap<T> = { [K in Exclude<keyof T, 'dirty'>]-?: FieldType };
 
 const exercises: FieldMap<Exercise> = {
   id: 'str', updatedAt: 'num', deleted: 'flag',
-  name: 'str', unit: 'str', load: 'str', notes: 'str', archived: 'flag', createdAt: 'num',
+  name: 'str', unit: 'str', load: 'str', notes: 'str', archived: 'flag', unilateral: 'flag', createdAt: 'num',
 };
 const routines: FieldMap<Routine> = {
   id: 'str', updatedAt: 'num', deleted: 'flag',
@@ -40,7 +40,7 @@ const entries: FieldMap<Entry> = {
 const sets: FieldMap<WorkSet> = {
   id: 'str', updatedAt: 'num', deleted: 'flag',
   entryId: 'str', sessionId: 'str', exerciseId: 'str', date: 'str', order: 'num',
-  weight: 'numN', unit: 'str', load: 'str', reps: 'numN', weight2: 'numN', reps2: 'numN', seconds: 'numN',
+  weight: 'numN', unit: 'str', load: 'str', reps: 'numN', repsR: 'numN', weight2: 'numN', reps2: 'numN', seconds: 'numN',
   done: 'flag', doubtful: 'flag',
 };
 
@@ -61,14 +61,14 @@ export const SHEET_NAMES: Record<TableName, string> = {
 
 /** Orden de columnas en la hoja: primero lo que sirve para leer, al final los ids. */
 export const COLUMN_ORDER: Record<TableName, string[]> = {
-  exercises: ['name', 'unit', 'load', 'notes', 'archived', 'createdAt', 'id', 'updatedAt', 'deleted'],
+  exercises: ['name', 'unit', 'load', 'notes', 'archived', 'createdAt', 'id', 'updatedAt', 'deleted', 'unilateral'],
   routines: ['name', 'weekdays', 'order', 'id', 'updatedAt', 'deleted'],
   slots: ['routineId', 'order', 'kind', 'exerciseIds', 'id', 'updatedAt', 'deleted'],
   sessions: ['date', 'title', 'routineId', 'notes', 'startedAt', 'finishedAt', 'source', 'id', 'updatedAt', 'deleted'],
   entries: ['sessionId', 'order', 'exerciseId', 'note', 'raw', 'review', 'reviewReason', 'slotId', 'id', 'updatedAt', 'deleted'],
   sets: [
     'date', 'ejercicio', 'order', 'weight', 'unit', 'load', 'reps', 'weight2', 'reps2', 'seconds', 'done', 'doubtful',
-    'entryId', 'sessionId', 'exerciseId', 'id', 'updatedAt', 'deleted',
+    'entryId', 'sessionId', 'exerciseId', 'id', 'updatedAt', 'deleted', 'repsR',
   ],
 };
 

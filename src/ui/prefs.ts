@@ -1,14 +1,29 @@
 import { useSyncExternalStore } from 'react';
+import { todayISO } from '../lib/dates';
 
 // Preferencias de este dispositivo (no se sincronizan).
 export interface Prefs {
   restSeconds: number;
+  /** Sonido al terminar el descanso, por defecto (lo que aplica si hoy no lo cambiaste). */
   restSound: boolean;
+  /** Cambio solo por un día (ej. hoy traes audífonos): vuelve al valor por defecto al día siguiente. */
+  soundDay: { date: string; on: boolean } | null;
+  /** Sonar aunque el iPhone esté en silencio. */
+  forceSound: boolean;
   keepAwake: boolean;
 }
 
 const KEY = 'app-gym:prefs';
-const DEFAULTS: Prefs = { restSeconds: 180, restSound: true, keepAwake: true };
+const DEFAULTS: Prefs = { restSeconds: 180, restSound: true, soundDay: null, forceSound: true, keepAwake: true };
+
+/** ¿Suena el descanso hoy? */
+export function restSoundOn(p: Prefs = prefs): boolean {
+  return p.soundDay && p.soundDay.date === todayISO() ? p.soundDay.on : p.restSound;
+}
+
+export function setRestSoundToday(on: boolean) {
+  setPrefs({ soundDay: { date: todayISO(), on } });
+}
 
 function load(): Prefs {
   try {

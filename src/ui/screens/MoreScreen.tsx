@@ -46,7 +46,11 @@ export function MoreScreen() {
               </button>
             ))}
           </div>
-          <Toggle label="Sonido al terminar el descanso" checked={prefs.restSound} onChange={(restSound) => setPrefs({ restSound })} />
+          <Toggle label="Sonido al terminar el descanso (por defecto)" checked={prefs.restSound} onChange={(restSound) => setPrefs({ restSound, soundDay: null })} />
+          <Toggle label="Sonar aunque el cel esté en silencio" checked={prefs.forceSound} onChange={(forceSound) => setPrefs({ forceSound })} />
+          <p className="faint tiny" style={{ margin: '8px 0 0' }}>
+            Para un solo día (por ejemplo, si traes audífonos), usa la campana arriba en el entrenamiento: al día siguiente regresa a lo de aquí.
+          </p>
           <Toggle label="Mantener la pantalla encendida mientras entreno" checked={prefs.keepAwake} onChange={(keepAwake) => setPrefs({ keepAwake })} />
         </div>
 

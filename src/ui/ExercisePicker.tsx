@@ -77,6 +77,7 @@ export function NewExerciseSheet({
   const [name, setName] = useState(initialName);
   const [unit, setUnit] = useState<Unit>('kg');
   const [load, setLoad] = useState<LoadMode>('normal');
+  const [unilateral, setUnilateral] = useState(/unilateral/i.test(initialName));
   return (
     <Sheet title="Nuevo ejercicio" onClose={onClose}>
       <label className="field">
@@ -104,12 +105,16 @@ export function NewExerciseSheet({
           ]}
         />
       </div>
+      <label className="row field" style={{ minHeight: 32 }}>
+        <span style={{ flex: 1, margin: 0 }}>Unilateral (reps de cada lado)</span>
+        <input type="checkbox" checked={unilateral} onChange={(e) => setUnilateral(e.target.checked)} style={{ width: 22, height: 22, accentColor: 'var(--accent)' }} />
+      </label>
       <div className="stack">
         <button
           className="btn primary block big"
           disabled={!name.trim()}
           onClick={async () => {
-            const ex = await createExercise({ name, unit, load });
+            const ex = await createExercise({ name, unit, load, unilateral: unilateral ? 1 : 0 });
             onCreated(ex);
           }}
         >

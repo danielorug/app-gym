@@ -59,3 +59,15 @@ describe('récords y comparación', () => {
     expect(deltaVs(s(25, 5), undefined)).toBeNull();
   });
 });
+
+describe('unilaterales', () => {
+  it('muestra cada lado y usa el más débil para comparar', () => {
+    expect(formatSet(s(20, 9, { repsR: 9 }))).toBe('20 kg × 9 por lado');
+    expect(formatSet(s(20, 9, { repsR: 8 }))).toBe('20 kg × 9 izq, 8 der');
+    expect(compactSets([s(20, 9, { repsR: 8 }), s(20, 9, { repsR: 8 })])).toBe('20 kg × 9 izq, 8 der (2 series)');
+    // 9/8 contra 8/8: el lado débil (8) es igual → misma serie para efectos de progreso
+    expect(deltaVs(s(20, 9, { repsR: 8 }), s(20, 8, { repsR: 8 }))).toBe('same');
+    expect(deltaVs(s(20, 9, { repsR: 9 }), s(20, 9, { repsR: 8 }))).toBe('up');
+    expect(bestSet([s(20, 10, { repsR: 7 }), s(20, 8, { repsR: 8 })])).toEqual(s(20, 8, { repsR: 8 }));
+  });
+});

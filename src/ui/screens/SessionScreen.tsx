@@ -3,6 +3,7 @@ import type { Entry, Exercise, LoadMode, RoutineSlot, Session, Unit, WorkSet } f
 import {
   addEntry,
   addSet,
+  addSlot,
   deleteSession,
   deleteSet,
   finishSession,
@@ -13,22 +14,27 @@ import {
   updateSession,
   updateSet,
   updateSlot,
+  makeUnilateralVariant,
+  saveEntryOrder,
   useEntries,
   useExercises,
   useLastTime,
-  useRecord,
   useSession,
   useSessionSets,
   useSlots,
 } from '../../lib/data';
 import { capitalize, formatDayMonth, formatLong } from '../../lib/dates';
-import { bestSet, compactSets, compareSets, deltaVs, fmtNum, formatSet, LOAD_LABELS, parseNum, toNotation, type SetLike } from '../../lib/format';
+import { compactSets, deltaVs, fmtNum, formatSet, formatWeight, LOAD_LABELS, parseNum, toNotation, type SetLike } from '../../lib/format';
+import { bestAtLastWeight, scoreSet } from '../../lib/progress';
 import { AutoSaveText, Confirm, Segmented, Sheet, Topbar, toast } from '../components';
 import { ExercisePicker } from '../ExercisePicker';
-import { IconCheck, IconMore, IconPlus, IconTrophy } from '../icons';
-import { usePrefs } from '../prefs';
+import { ProgressSheet, useProgress } from '../ProgressView';
+import { ReorderList } from '../Reorder';
+import { IconBell, IconBellOff, IconChart, IconCheck, IconGrip, IconMore, IconPlus, IconTrophy } from '../icons';
+import { restSoundOn, setRestSoundToday, usePrefs } from '../prefs';
 import { primeAudio, startRest, stopRest } from '../rest';
 import { navigate } from '../router';
+import { skipRef, useSkipped } from '../skipped';
 
 export function SessionScreen({ id }: { id: string }) {
   const session = useSession(id);
@@ -41,7 +47,10 @@ export function SessionScreen({ id }: { id: string }) {
   const [picker, setPicker] = useState(false);
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [addChoice, setAddChoice] = useState<Exercise | null>(null);
+  const [ordering, setOrdering] = useState(false);
   const prefs = usePrefs();
+  const soundOn = restSoundOn(prefs);
 
   const live = !!session && !session.finishedAt && session.source === 'app';
   const editable = live || editing;
@@ -57,6 +66,18 @@ export function SessionScreen({ id }: { id: string }) {
     );
   }
 
+  const addAndScroll = async (exerciseId: string, slotId: string | null) => {
+    await addEntry(session.id, exerciseId, slotId);
+    setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }), 100);
+  };
+  const chooseAdd = async (kind: 'normal' | 'opcional' | null) => {
+    const ex = addChoice!;
+    setAddChoice(null);
+    const slot = kind && session.routineId ? await addSlot(session.routineId, ex.id, kind) : null;
+    await addAndScroll(ex.id, slot?.id ?? null);
+    if (kind) toast(kind === 'opcional' ? 'Agregado a la rutina como opcional' : 'Agregado a la rutina');
+  };
+
   const slotMap = new Map((slots ?? []).map((s) => [s.id, s]));
   const doneCount = [...setsMap.values()].flat().filter((s) => s.done === 1).length;
   const visible = editable ? entries : entries.filter((e) => (setsMap.get(e.id) ?? []).some((s) => s.done === 1));
@@ -69,9 +90,23 @@ export function SessionScreen({ id }: { id: string }) {
         title={session.title}
         right={
           live ? (
-            <button className="btn primary small" onClick={() => setConfirmFinish(true)}>
-              Terminar
-            </button>
+            <>
+              <button
+                className="icon-btn"
+                style={{ color: soundOn ? 'var(--accent)' : 'var(--faint)' }}
+                aria-label={soundOn ? 'Sonido del descanso encendido hoy. Tocar para apagar' : 'Sonido del descanso apagado hoy. Tocar para encender'}
+                onClick={() => {
+                  setRestSoundToday(!soundOn);
+                  if (!soundOn) primeAudio();
+                  toast(soundOn ? 'Sonido del descanso apagado (solo hoy)' : 'Sonido del descanso encendido (solo hoy)');
+                }}
+              >
+                {soundOn ? <IconBell /> : <IconBellOff />}
+              </button>
+              <button className="btn primary small" onClick={() => setConfirmFinish(true)}>
+                Terminar
+              </button>
+            </>
           ) : (
             <button className="btn ghost" onClick={() => setEditing(!editing)}>
               {editing ? 'Listo' : 'Editar'}
@@ -99,6 +134,13 @@ export function SessionScreen({ id }: { id: string }) {
           <NotationTable entries={visible} setsMap={setsMap} exercises={exercises} />
         ) : (
           <div style={{ marginTop: 12 }}>
+            {editable && entries.length > 1 && (
+              <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 6 }}>
+                <button className="btn ghost small" onClick={() => setOrdering(true)}>
+                  <IconGrip size={16} /> Ordenar
+                </button>
+              </div>
+            )}
             {visible.map((entry, i) => (
               <EntryCard
                 key={entry.id}
@@ -159,10 +201,24 @@ export function SessionScreen({ id }: { id: string }) {
           onClose={() => setPicker(false)}
           onPick={async (ex) => {
             setPicker(false);
-            await addEntry(session.id, ex.id);
-            setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }), 100);
+            // En una rutina, preguntar si es solo por hoy o si se queda en la rutina (normal u opcional).
+            if (session.routineId && live) setAddChoice(ex);
+            else await addAndScroll(ex.id, null);
           }}
         />
+      )}
+      {ordering && (
+        <OrderSheet entries={entries} exercises={exercises} routineSlots={session.routineId ? slots : undefined} onClose={() => setOrdering(false)} />
+      )}
+      {addChoice && session.routineId && (
+        <Sheet title={addChoice.name} onClose={() => setAddChoice(null)}>
+          <p className="muted small" style={{ marginTop: 0 }}>
+            ¿Lo agrego solo a este entrenamiento o también a tu rutina?
+          </p>
+          <MenuButton label="Solo hoy" onClick={() => void chooseAdd(null)} />
+          <MenuButton label="Hoy y en la rutina" onClick={() => void chooseAdd('normal')} />
+          <MenuButton label="Hoy y en la rutina como opcional" onClick={() => void chooseAdd('opcional')} />
+        </Sheet>
       )}
       {confirmFinish && (
         <Confirm
@@ -202,6 +258,58 @@ export function SessionScreen({ id }: { id: string }) {
         />
       )}
     </>
+  );
+}
+
+function OrderSheet({
+  entries,
+  exercises,
+  routineSlots,
+  onClose,
+}: {
+  entries: Entry[];
+  exercises: Map<string, Exercise>;
+  routineSlots: RoutineSlot[] | undefined;
+  onClose: () => void;
+}) {
+  const [alsoRoutine, setAlsoRoutine] = useState(false);
+  // El último orden que arrastraste (la lista de la base puede tardar un instante en actualizarse).
+  const latest = useRef<Entry[] | null>(null);
+  return (
+    <Sheet title="Ordenar ejercicios" onClose={onClose}>
+      <p className="muted small" style={{ marginTop: 0 }}>
+        Arrastra ☰ para mover un ejercicio.
+      </p>
+      <ReorderList
+        items={entries}
+        keyOf={(e) => e.id}
+        label={(e) => exercises.get(e.exerciseId)?.name ?? '?'}
+        onReorder={(next) => {
+          latest.current = next;
+          void saveEntryOrder(next);
+        }}
+        render={(e) => <div style={{ fontWeight: 600 }}>{exercises.get(e.exerciseId)?.name ?? '?'}</div>}
+      />
+      {routineSlots && (
+        <label className="row" style={{ margin: '14px 2px 4px', minHeight: 32 }}>
+          <span style={{ flex: 1 }}>Guardar este orden también en la rutina</span>
+          <input type="checkbox" checked={alsoRoutine} onChange={(e) => setAlsoRoutine(e.target.checked)} style={{ width: 22, height: 22, accentColor: 'var(--accent)' }} />
+        </label>
+      )}
+      <button
+        className="btn primary block"
+        style={{ marginTop: 10 }}
+        onClick={async () => {
+          if (alsoRoutine && routineSlots) {
+            await saveEntryOrder(latest.current ?? entries, routineSlots);
+            toast('Orden guardado en la rutina');
+          }
+          onClose();
+        }}
+      >
+        Listo
+      </button>
+    </Sheet>
   );
 }
 
@@ -266,27 +374,37 @@ function EntryCard({
   live: boolean;
 }) {
   const last = useLastTime(entry.exerciseId, session.date, session.id);
-  const record = useRecord(entry.exerciseId, session.date);
+  const progress = useProgress(exercise, session.id);
+  const [showProgress, setShowProgress] = useState(false);
+  const skipKey = `${entry.id}:${entry.exerciseId}`;
+  const skipped = useSkipped(skipKey);
   const [menu, setMenu] = useState(false);
   const [sheet, setSheet] = useState<null | 'notes' | 'dayNote' | 'change' | 'variant' | 'remove'>(null);
   const [notesOpen, setNotesOpen] = useState(false);
 
   if (!exercise) return null;
   const refSets = last?.sets ?? [];
-  const ghostCount = live ? Math.max(0, refSets.length - sets.length) : 0;
+  // Series de la vez pasada que siguen "planeadas" hoy (las que quitaste deslizando ya no cuentan).
+  const refs = refSets.map((s, k) => ({ s, k })).filter((r) => !skipped.includes(r.k));
+  const ghostCount = live ? Math.max(0, refs.length - sets.length) : 0;
   const doneSets = sets.filter((s) => s.done === 1);
-  const todayBest = bestSet(doneSets);
-  const isPR = !!todayBest && !!record && compareSets(todayBest, record.set) > 0;
+  // "Récord" = hoy superaste tu mejor serie de siempre (peso y reps combinados).
+  const bestBefore = progress?.bestPoint?.score;
+  const todayScore = progress ? Math.max(0, ...doneSets.map((s) => scoreSet(s, progress.metric, exercise.unit))) : 0;
+  const isPR = bestBefore != null && todayScore > bestBefore + 1e-6;
+  const hint = progress ? bestAtLastWeight(progress, exercise.unit) : null;
   const complete = sets.length > 0 && ghostCount === 0 && sets.every((s) => s.done === 1);
   const maxOrder = sets.reduce((m, s) => Math.max(m, s.order), -1);
   const variants = slot && slot.exerciseIds.length > 1 ? slot.exerciseIds.map((id) => exercises.get(id)).filter((e): e is Exercise => !!e) : [];
   const total = sets.length + ghostCount;
+  const unilateral = exercise.unilateral === 1;
 
   const addEmptySet = async () => {
-    const prev = sets[sets.length - 1] ?? refSets[refSets.length - 1];
+    const prev = sets[sets.length - 1] ?? refs[refs.length - 1]?.s ?? refSets[refSets.length - 1];
     await addSet(entry, session.date, maxOrder + 1, {
       weight: prev?.weight ?? null,
       reps: prev?.reps ?? null,
+      repsR: unilateral ? (prev?.repsR ?? prev?.reps ?? null) : null,
       unit: prev?.unit ?? exercise.unit,
       load: prev?.load ?? exercise.load,
       weight2: prev?.weight2 ?? null,
@@ -296,17 +414,27 @@ function EntryCard({
     });
   };
 
+  /** Quitar la fila i: si es una serie de hoy se borra; en ambos casos esa serie de la vez pasada deja de estar planeada. */
+  const removeRow = async (i: number) => {
+    if (refs[i]) skipRef(skipKey, refs[i].k);
+    if (i < sets.length) await deleteSet(sets[i]);
+  };
+
   return (
     <div className={`entry${complete ? ' complete' : ''}`}>
       <div className="entry-head">
         <div className="entry-num">{complete ? <IconCheck size={14} /> : index + 1}</div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <button className="entry-name" onClick={() => navigate(`ejercicio/${exercise.id}`)}>
+          <button className="entry-name" onClick={() => setShowProgress(true)} aria-label={`${exercise.name}: ver progreso`}>
             {exercise.name}
+            <span className="chart-hint">
+              <IconChart size={16} />
+            </span>
           </button>
-          {(slot?.kind === 'opcional' || entry.note || isPR || entry.review === 1) && (
+          {(slot?.kind === 'opcional' || entry.note || isPR || entry.review === 1 || unilateral) && (
             <div className="row wrap" style={{ marginTop: 4, gap: 6 }}>
               {slot?.kind === 'opcional' && <span className="badge">Opcional</span>}
+              {unilateral && <span className="badge">Izq / Der</span>}
               {entry.note && <span className="badge accent">{entry.note}</span>}
               {isPR && (
                 <span className="badge good">
@@ -351,19 +479,27 @@ function EntryCard({
             <>Primera vez con este ejercicio</>
           )}
         </div>
-        {record && (
-          <div className="faint tiny" style={{ marginTop: 3 }}>
-            Récord: {formatSet(record.set)} · {formatDayMonth(record.date)}
+        {progress?.bestPoint && (
+          <div className="best-line">
+            Tu mejor · {formatDayMonth(progress.bestPoint.date)}: <b>{formatSet(progress.bestPoint.best)}</b>
+            {progress.last && progress.last.sessionId !== progress.bestPoint.sessionId && progress.lastVsBest != null && (
+              <span className="faint"> · la última vez, {Math.round(progress.lastVsBest * 100)}%</span>
+            )}
+          </div>
+        )}
+        {hint && (
+          <div className="best-hint">
+            Con {formatWeight(hint.set)} ya has hecho {fmtNum(hint.reps)} reps ({formatDayMonth(hint.date)})
           </div>
         )}
         {entry.review === 1 && entry.raw && <div className="raw" style={{ marginTop: 8 }}>{entry.reviewReason ? `${entry.reviewReason}\n` : ''}{entry.raw}</div>}
 
         {total > 0 && (
           <div className="sets">
-            <div className="sets-head">
+            <div className={`sets-head${unilateral ? ' uni' : ''}`}>
               <span style={{ textAlign: 'center' }}>Serie</span>
               <span style={{ textAlign: 'center' }}>Peso</span>
-              <span style={{ textAlign: 'center' }}>Reps</span>
+              <span style={{ textAlign: 'center' }}>{unilateral ? 'Reps izq · der' : 'Reps'}</span>
               <span />
             </div>
             {Array.from({ length: total }, (_, i) => (
@@ -371,15 +507,17 @@ function EntryCard({
                 key={`row-${i}`}
                 index={i}
                 set={sets[i]}
-                reference={refSets[i]}
-                fallback={sets[i - 1] ?? refSets[refSets.length - 1]}
+                reference={refs[i]?.s}
+                fallback={sets[i - 1] ?? refs[refs.length - 1]?.s ?? refSets[refSets.length - 1]}
                 order={i < sets.length ? sets[i].order : maxOrder + 1 + (i - sets.length)}
                 entry={entry}
                 session={session}
                 exercise={exercise}
                 editable={editable}
+                onRemove={() => removeRow(i)}
               />
             ))}
+            {editable && total > 0 && <div className="faint tiny swipe-hint">Desliza una serie a la izquierda para quitarla</div>}
           </div>
         )}
 
@@ -392,10 +530,31 @@ function EntryCard({
 
       {menu && (
         <Sheet title={exercise.name} onClose={() => setMenu(false)}>
-          <MenuButton label={entry.note ? `Nota del día: ${entry.note}` : 'Nota del día (ej. Unilateral)'} onClick={() => (setMenu(false), setSheet('dayNote'))} />
+          <MenuButton label={entry.note ? `Nota del día: ${entry.note}` : 'Nota del día (ej. Agarre abierto)'} onClick={() => (setMenu(false), setSheet('dayNote'))} />
           <MenuButton label="Editar notas del ejercicio" onClick={() => (setMenu(false), setSheet('notes'))} />
+          {!unilateral && (
+            <MenuButton
+              label="Hacerlo unilateral (variante con izquierda y derecha)"
+              onClick={async () => {
+                setMenu(false);
+                const v = await makeUnilateralVariant(entry, exercise, slot);
+                toast(slot ? `${v.name} quedó como variante` : `Cambiado a ${v.name}`);
+              }}
+            />
+          )}
           <MenuButton label="Cambiar por otro ejercicio" onClick={() => (setMenu(false), setSheet('change'))} />
           {slot && <MenuButton label="Agregar una variante a la rutina" onClick={() => (setMenu(false), setSheet('variant'))} />}
+          {slot && slot.kind !== 'no' && (
+            <MenuButton
+              label={slot.kind === 'opcional' ? 'Quitar “opcional” (hacerlo siempre)' : 'Marcar como opcional en la rutina'}
+              onClick={async () => {
+                setMenu(false);
+                const kind = slot.kind === 'opcional' ? 'normal' : 'opcional';
+                await updateSlot(slot, { kind });
+                toast(kind === 'opcional' ? 'Ahora es opcional en la rutina' : 'Ya no es opcional');
+              }}
+            />
+          )}
           <MenuButton label="Mover arriba" disabled={index === 0} onClick={() => (setMenu(false), moveEntry(entries, entries.indexOf(entry), -1))} />
           <MenuButton label="Mover abajo" disabled={index === entries.length - 1} onClick={() => (setMenu(false), moveEntry(entries, entries.indexOf(entry), 1))} />
           <MenuButton label="Quitar de este entrenamiento" danger onClick={() => (setMenu(false), sets.length ? setSheet('remove') : removeEntry(entry))} />
@@ -413,6 +572,7 @@ function EntryCard({
         </Sheet>
       )}
       {sheet === 'dayNote' && <DayNoteSheet entry={entry} onClose={() => setSheet(null)} />}
+      {showProgress && <ProgressSheet exercise={exercise} excludeSessionId={session.id} onClose={() => setShowProgress(false)} />}
       {sheet === 'change' && (
         <ExercisePicker
           title="Cambiar ejercicio"
@@ -498,6 +658,7 @@ function DayNoteSheet({ entry, onClose }: { entry: Entry; onClose: () => void })
 interface Texts {
   w: string;
   r: string;
+  rR: string;
   w2: string;
   r2: string;
   sec: string;
@@ -506,8 +667,10 @@ interface Texts {
 const toText = (n: number | null | undefined) => (n == null ? '' : fmtNum(n));
 
 function textsFrom(set: SetLike | undefined): Texts {
-  return { w: toText(set?.weight), r: toText(set?.reps), w2: toText(set?.weight2), r2: toText(set?.reps2), sec: toText(set?.seconds) };
+  return { w: toText(set?.weight), r: toText(set?.reps), rR: toText(set?.repsR), w2: toText(set?.weight2), r2: toText(set?.reps2), sec: toText(set?.seconds) };
 }
+
+const SWIPE_DELETE_AT = -70;
 
 function SetRow({
   index,
@@ -519,6 +682,7 @@ function SetRow({
   session,
   exercise,
   editable,
+  onRemove,
 }: {
   index: number;
   set: WorkSet | undefined;
@@ -529,10 +693,12 @@ function SetRow({
   session: Session;
   exercise: Exercise;
   editable: boolean;
+  onRemove: () => Promise<void>;
 }) {
   const source: SetLike | undefined = reference ?? fallback;
   const [texts, setTexts] = useState<Texts>(() => textsFrom(set));
   const [menu, setMenu] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const [extra, setExtra] = useState<{ part2?: boolean; time?: boolean; unit?: Unit; load?: LoadMode }>({});
   const focused = useRef(false);
   const created = useRef<WorkSet | null>(null);
@@ -557,17 +723,19 @@ function SetRow({
   const part2 = extra.part2 ?? (current ? current.weight2 != null || current.reps2 != null : source?.weight2 != null || source?.reps2 != null);
   const shape = current ?? source;
   const timeMode = extra.time ?? (shape ? shape.seconds != null && shape.reps == null : false);
+  const unilateral = !timeMode && (exercise.unilateral === 1 || current?.repsR != null);
   const done = current?.done === 1;
   const delta = done && current ? deltaVs(current, reference) : null;
+  const ghost = !current;
 
-  const placeholder = (field: 'weight' | 'reps' | 'weight2' | 'reps2' | 'seconds') => {
-    const v = source?.[field];
+  const placeholder = (field: 'weight' | 'reps' | 'repsR' | 'weight2' | 'reps2' | 'seconds') => {
+    const v = field === 'repsR' ? (source?.repsR ?? source?.reps) : source?.[field];
     if (field === 'weight' && load === 'lado' && v === 0) return 'Barra';
     if (field === 'weight' && load === 'corporal' && v == null) return '—';
     return v == null ? '' : fmtNum(v);
   };
 
-  /** Guarda la fila completa. Con `markDone`, lo vacío se llena con lo de la vez pasada. */
+  /** Guarda la fila completa. Con `doneFlag` = 1, lo vacío se llena con lo de la vez pasada. */
   const persist = async (next: Texts, doneFlag?: 0 | 1, overrides: Partial<WorkSet> = {}) => {
     const fill = doneFlag === 1;
     const pick = (text: string, ph: number | null | undefined) => {
@@ -577,6 +745,7 @@ function SetRow({
     const values = {
       weight: pick(next.w, source?.weight ?? (load === 'lado' ? 0 : null)),
       reps: timeMode ? null : pick(next.r, source?.reps),
+      repsR: unilateral ? pick(next.rR, source?.repsR ?? source?.reps) : null,
       weight2: part2 ? pick(next.w2, source?.weight2) : null,
       reps2: part2 && !timeMode ? pick(next.r2, source?.reps2) : null,
       seconds: timeMode ? pick(next.sec, source?.seconds) : null,
@@ -616,6 +785,50 @@ function SetRow({
     }
     await persist(texts, 1);
     if (!session.finishedAt) startRest(exercise.name);
+  };
+
+  // ── Deslizar a la izquierda para quitar (siempre pide confirmación) ──
+  const [dx, setDx] = useState(0);
+  const dxRef = useRef(0);
+  const gesture = useRef<{ x: number; y: number; id: number; horizontal: boolean } | null>(null);
+  const justSwiped = useRef(false);
+  const moveTo = (v: number) => {
+    dxRef.current = v;
+    setDx(v);
+  };
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (!editable || e.button > 0) return;
+    gesture.current = { x: e.clientX, y: e.clientY, id: e.pointerId, horizontal: false };
+  };
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const g = gesture.current;
+    if (!g || g.id !== e.pointerId) return;
+    const ddx = e.clientX - g.x;
+    const ddy = e.clientY - g.y;
+    if (!g.horizontal) {
+      if (Math.abs(ddy) > 10 && Math.abs(ddy) > Math.abs(ddx)) {
+        gesture.current = null; // es scroll vertical
+        return;
+      }
+      if (Math.abs(ddx) < 12 || Math.abs(ddx) < Math.abs(ddy) * 1.3) return;
+      g.horizontal = true;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      (document.activeElement as HTMLElement | null)?.blur?.();
+    }
+    moveTo(Math.max(-130, Math.min(0, ddx)));
+  };
+  const onPointerEnd = () => {
+    const g = gesture.current;
+    gesture.current = null;
+    if (!g?.horizontal) return;
+    justSwiped.current = true;
+    setTimeout(() => (justSwiped.current = false), 350);
+    if (dxRef.current <= SWIPE_DELETE_AT) {
+      moveTo(-90);
+      setConfirmRemove(true);
+    } else {
+      moveTo(0);
+    }
   };
 
   const field = (key: keyof Texts, ph: string, opts: { prefix?: string; suffix?: React.ReactNode; label: string }) => (
@@ -659,71 +872,125 @@ function SetRow({
   );
 
   const weightPrefix = load === 'lado' ? '2×' : load === 'corporal' ? 'Corp ±' : undefined;
+  const n = index + 1;
+
+  const repsCell = timeMode ? (
+    field('sec', placeholder('seconds'), { suffix: <span className="affix">s</span>, label: `Segundos serie ${n}` })
+  ) : unilateral ? (
+    <div className="uni-reps">
+      {field('r', placeholder('reps'), { prefix: 'I', label: `Reps izquierda serie ${n}` })}
+      {field('rR', placeholder('repsR'), { prefix: 'D', label: `Reps derecha serie ${n}` })}
+    </div>
+  ) : (
+    field('r', placeholder('reps'), { label: `Reps serie ${n}` })
+  );
 
   return (
     <>
-      <div className={`set-row${done ? ' done' : ''}${current ? '' : ' ghost'}`}>
-        <button className="set-num" onClick={() => editable && current && setMenu(true)} aria-label={`Serie ${index + 1}, opciones`}>
-          {index + 1}
-          {delta && <span className={`delta ${delta}`}>{delta === 'up' ? '▲' : delta === 'down' ? '▼' : '='}</span>}
-        </button>
-        {field('w', placeholder('weight'), { prefix: weightPrefix, suffix: unitButton, label: `Peso serie ${index + 1}` })}
-        {timeMode
-          ? field('sec', placeholder('seconds'), { suffix: <span className="affix">s</span>, label: `Segundos serie ${index + 1}` })
-          : field('r', placeholder('reps'), { label: `Reps serie ${index + 1}` })}
-        <button className={`check${done ? ' on' : ''}`} onClick={toggleDone} disabled={!editable} aria-label={done ? 'Desmarcar serie' : 'Palomear serie'}>
-          <IconCheck size={20} />
-        </button>
-      </div>
-      {part2 && (
-        <div className={`set-row${done ? ' done' : ''}`}>
-          <span className="part2-label">luego /</span>
-          {field('w2', placeholder('weight2'), { prefix: weightPrefix, suffix: <span className="affix">{unit}</span>, label: `Peso parte 2 serie ${index + 1}` })}
-          {timeMode ? <span /> : field('r2', placeholder('reps2'), { label: `Reps parte 2 serie ${index + 1}` })}
-          <span />
+      <div className={`swipe${dx < 0 ? ' swiping' : ''}`}>
+        <div className="swipe-bg" aria-hidden="true">
+          {ghost ? 'Quitar' : 'Borrar'}
         </div>
-      )}
+        <div
+          className="swipe-fg"
+          style={dx ? { transform: `translateX(${dx}px)` } : undefined}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerEnd}
+          onPointerCancel={onPointerEnd}
+          onClickCapture={(e) => {
+            if (justSwiped.current) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+          }}
+        >
+          <div className={`set-row${unilateral ? ' uni' : ''}${done ? ' done' : ''}${ghost ? ' ghost' : ''}`}>
+            <button className="set-num" onClick={() => editable && setMenu(true)} aria-label={`Serie ${n}, opciones`}>
+              {n}
+              {delta && <span className={`delta ${delta}`}>{delta === 'up' ? '▲' : delta === 'down' ? '▼' : '='}</span>}
+            </button>
+            {field('w', placeholder('weight'), { prefix: weightPrefix, suffix: unitButton, label: `Peso serie ${n}` })}
+            {repsCell}
+            <button className={`check${done ? ' on' : ''}`} onClick={toggleDone} disabled={!editable} aria-label={done ? 'Desmarcar serie' : 'Palomear serie'}>
+              <IconCheck size={20} />
+            </button>
+          </div>
+          {part2 && (
+            <div className={`set-row${done ? ' done' : ''}`}>
+              <span className="part2-label">luego /</span>
+              {field('w2', placeholder('weight2'), { prefix: weightPrefix, suffix: <span className="affix">{unit}</span>, label: `Peso parte 2 serie ${n}` })}
+              {timeMode ? <span /> : field('r2', placeholder('reps2'), { label: `Reps parte 2 serie ${n}` })}
+              <span />
+            </div>
+          )}
+        </div>
+      </div>
 
-      {menu && current && (
-        <Sheet title={`Serie ${index + 1}`} onClose={() => setMenu(false)}>
+      {menu && (
+        <Sheet title={`Serie ${n}`} onClose={() => setMenu(false)}>
+          {current && (
+            <>
+              <MenuButton
+                label={part2 ? 'Quitar segunda parte ( / )' : 'Agregar segunda parte ( / ) — ej. juntos y luego unilateral'}
+                onClick={() => {
+                  setMenu(false);
+                  setExtra({ ...extra, part2: !part2 });
+                  if (part2) void updateSet(current, { weight2: null, reps2: null });
+                }}
+              />
+              <MenuButton
+                label={timeMode ? 'Registrar por repeticiones' : 'Registrar por tiempo (segundos)'}
+                onClick={() => {
+                  setMenu(false);
+                  setExtra({ ...extra, time: !timeMode });
+                  void updateSet(current, timeMode ? { seconds: null } : { reps: null, repsR: null, reps2: null });
+                }}
+              />
+              <div className="section-title" style={{ marginTop: 12 }}>Tipo de peso</div>
+              {(Object.keys(LOAD_LABELS) as LoadMode[]).map((l) => (
+                <MenuButton
+                  key={l}
+                  label={`${l === load ? '✓ ' : ''}${LOAD_LABELS[l]}`}
+                  onClick={() => {
+                    setMenu(false);
+                    setExtra({ ...extra, load: l });
+                    void updateSet(current, { load: l });
+                  }}
+                />
+              ))}
+              <div style={{ height: 8 }} />
+            </>
+          )}
           <MenuButton
-            label={part2 ? 'Quitar segunda parte ( / )' : 'Agregar segunda parte ( / ) — ej. juntos y luego unilateral'}
-            onClick={() => {
-              setMenu(false);
-              setExtra({ ...extra, part2: !part2 });
-              if (part2) void updateSet(current, { weight2: null, reps2: null });
-            }}
-          />
-          <MenuButton
-            label={timeMode ? 'Registrar por repeticiones' : 'Registrar por tiempo (segundos)'}
-            onClick={() => {
-              setMenu(false);
-              setExtra({ ...extra, time: !timeMode });
-              void updateSet(current, timeMode ? { seconds: null } : { reps: null, reps2: null });
-            }}
-          />
-          <div className="section-title" style={{ marginTop: 12 }}>Tipo de peso</div>
-          {(Object.keys(LOAD_LABELS) as LoadMode[]).map((l) => (
-            <MenuButton
-              key={l}
-              label={`${l === load ? '✓ ' : ''}${LOAD_LABELS[l]}`}
-              onClick={() => {
-                setMenu(false);
-                setExtra({ ...extra, load: l });
-                void updateSet(current, { load: l });
-              }}
-            />
-          ))}
-          <div style={{ height: 8 }} />
-          <MenuButton
-            label="Borrar serie"
+            label={ghost ? 'Quitar esta serie (solo hoy)' : 'Borrar serie'}
             danger
             onClick={() => {
               setMenu(false);
-              void deleteSet(current);
+              setConfirmRemove(true);
             }}
           />
         </Sheet>
+      )}
+      {confirmRemove && (
+        <Confirm
+          title={ghost ? `¿Quitar la serie ${n}?` : `¿Borrar la serie ${n}?`}
+          message={
+            ghost
+              ? 'Solo para hoy: no se guarda nada. La próxima vez verás las series que sí hagas.'
+              : `${formatSet(current!)} se borra de este entrenamiento.`
+          }
+          confirmLabel={ghost ? 'Quitar' : 'Borrar'}
+          danger
+          onClose={() => {
+            setConfirmRemove(false);
+            moveTo(0);
+          }}
+          onConfirm={async () => {
+            await onRemove();
+            moveTo(0);
+          }}
+        />
       )}
     </>
   );

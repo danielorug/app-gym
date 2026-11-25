@@ -100,3 +100,24 @@ export const IconWarn = (p: P) => (
     <path d="M12 4 2.8 19.5h18.4L12 4ZM12 10v4.5M12 17.2h.01" />
   </Svg>
 );
+export const IconBell = (p: P) => (
+  <Svg {...p}>
+    <path d="M6 16.5V11a6 6 0 1 1 12 0v5.5l1.5 2h-15l1.5-2ZM10 20.5a2 2 0 0 0 4 0" />
+  </Svg>
+);
+export const IconBellOff = (p: P) => (
+  <Svg {...p}>
+    <path d="M8.2 5.6A6 6 0 0 1 18 11v5.5l1.5 2H9M6 11v5.5l-1.5 2H13M10 20.5a2 2 0 0 0 4 0M4 4l16 16" />
+  </Svg>
+);
+export const IconChart = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 19h16M6.5 15.5l4-4.5 3 2.5 5-6" />
+    <circle cx="18.5" cy="7.5" r="0.6" fill="currentColor" />
+  </Svg>
+);
+export const IconGrip = (p: P) => (
+  <Svg {...p}>
+    <path d="M5 8h14M5 12h14M5 16h14" />
+  </Svg>
+);

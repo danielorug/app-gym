@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import type { RoutineSlot, SlotKind } from '../../db/types';
-import { addSlot, createRoutine, deleteRoutine, moveSlot, removeSlot, updateRoutine, updateSlot, useExercises, useRoutine, useRoutines, useSlots } from '../../lib/data';
+import { addSlot, createRoutine, deleteRoutine, removeSlot, saveSlotOrder, updateRoutine, updateSlot, useExercises, useRoutine, useRoutines, useSlots } from '../../lib/data';
 import { WEEKDAY_LETTERS, WEEKDAY_NAMES } from '../../lib/dates';
 import { Confirm, Segmented, Topbar } from '../components';
 import { ExercisePicker } from '../ExercisePicker';
-import { IconChevronRight, IconDown, IconPlus, IconUp, IconX } from '../icons';
+import { IconChevronRight, IconPlus, IconX } from '../icons';
+import { ReorderList } from '../Reorder';
 import { navigate } from '../router';
 
 const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
@@ -96,57 +97,59 @@ export function RoutineEditScreen({ id }: { id: string }) {
         </div>
 
         <div className="section-title">Ejercicios (en orden)</div>
-        {slots.map((slot, i) => (
-          <div key={slot.id} className="card" style={{ marginBottom: 10 }}>
-            <div className="row" style={{ alignItems: 'flex-start' }}>
-              <div className="entry-num">{i + 1}</div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                {slot.exerciseIds.map((exId, vi) => (
-                  <div key={exId} className="row" style={{ minHeight: 30 }}>
-                    <span style={{ flex: 1, fontWeight: vi === 0 ? 650 : 500, color: vi === 0 ? 'var(--text)' : 'var(--muted)' }}>
-                      {vi > 0 && <span className="faint">o </span>}
-                      {exercises.get(exId)?.name ?? '?'}
-                    </span>
-                    {slot.exerciseIds.length > 1 && (
-                      <button className="icon-btn" style={{ width: 30, height: 30 }} aria-label="Quitar variante" onClick={() => updateSlot(slot, { exerciseIds: slot.exerciseIds.filter((x) => x !== exId) })}>
-                        <IconX size={16} />
-                      </button>
-                    )}
-                  </div>
-                ))}
-                <button className="btn ghost small" style={{ paddingLeft: 0 }} onClick={() => setPicker({ slot })}>
-                  <IconPlus size={14} /> Variante
-                </button>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <button className="icon-btn" disabled={i === 0} onClick={() => moveSlot(slots, i, -1)} aria-label="Subir">
-                  <IconUp size={18} />
-                </button>
-                <button className="icon-btn" disabled={i === slots.length - 1} onClick={() => moveSlot(slots, i, 1)} aria-label="Bajar">
-                  <IconDown size={18} />
-                </button>
-              </div>
-            </div>
-            <div className="row" style={{ marginTop: 8 }}>
-              <div style={{ flex: 1 }}>
-                <Segmented<SlotKind>
-                  value={slot.kind}
-                  onChange={(kind) => updateSlot(slot, { kind })}
-                  options={[
-                    { value: 'normal', label: 'Normal' },
-                    { value: 'opcional', label: 'Opcional' },
-                    { value: 'no', label: 'Fuera (NO)' },
-                  ]}
-                />
-              </div>
-              <button className="icon-btn" onClick={() => removeSlot(slot)} aria-label="Quitar de la rutina" style={{ color: 'var(--bad)' }}>
-                <IconX size={18} />
+        <ReorderList
+          items={slots}
+          keyOf={(slot) => slot.id}
+          label={(slot) => slot.exerciseIds.map((id) => exercises.get(id)?.name ?? '?').join(' / ')}
+          onReorder={(next) => void saveSlotOrder(next)}
+          render={(slot) => (
+            <>
+              {slot.exerciseIds.map((exId, vi) => (
+                <div key={exId} className="row" style={{ minHeight: 30 }}>
+                  <span style={{ flex: 1, fontWeight: vi === 0 ? 650 : 500, color: vi === 0 ? 'var(--text)' : 'var(--muted)' }}>
+                    {vi > 0 && <span className="faint">o </span>}
+                    {exercises.get(exId)?.name ?? '?'}
+                  </span>
+                  {vi > 0 && (
+                    <button
+                      className="btn ghost small"
+                      aria-label={`Hacer principal: ${exercises.get(exId)?.name ?? ''}`}
+                      onClick={() => updateSlot(slot, { exerciseIds: [exId, ...slot.exerciseIds.filter((x) => x !== exId)] })}
+                    >
+                      Principal
+                    </button>
+                  )}
+                  {slot.exerciseIds.length > 1 && (
+                    <button className="icon-btn" style={{ width: 30, height: 30 }} aria-label="Quitar variante" onClick={() => updateSlot(slot, { exerciseIds: slot.exerciseIds.filter((x) => x !== exId) })}>
+                      <IconX size={16} />
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button className="btn ghost small" style={{ paddingLeft: 0 }} onClick={() => setPicker({ slot })}>
+                <IconPlus size={14} /> Variante
               </button>
-            </div>
-          </div>
-        ))}
+              <div className="row" style={{ marginTop: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <Segmented<SlotKind>
+                    value={slot.kind}
+                    onChange={(kind) => updateSlot(slot, { kind })}
+                    options={[
+                      { value: 'normal', label: 'Normal' },
+                      { value: 'opcional', label: 'Opcional' },
+                      { value: 'no', label: 'Fuera (NO)' },
+                    ]}
+                  />
+                </div>
+                <button className="icon-btn" onClick={() => removeSlot(slot)} aria-label="Quitar de la rutina" style={{ color: 'var(--bad)' }}>
+                  <IconX size={18} />
+                </button>
+              </div>
+            </>
+          )}
+        />
         <p className="faint tiny" style={{ margin: '4px 4px 12px' }}>
-          Variantes: se intercambian (ej. Banca o Converging si está ocupada). Al empezar, la app elige la que hiciste más recientemente. “Fuera (NO)” = no está en la rutina pero no quieres perder su récord.
+          Arrastra ☰ para cambiar el orden. Variantes: se intercambian (ej. Banca o Converging si está ocupada). Al empezar, la app elige la que hiciste más recientemente; “Principal” la pone primero. “Fuera (NO)” = no está en la rutina pero no quieres perder su récord.
         </p>
         <button className="btn block" onClick={() => setPicker({})}>
           <IconPlus size={18} /> Agregar ejercicio

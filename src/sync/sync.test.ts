@@ -37,17 +37,17 @@ async function dump(dev: Device) {
 
 const base = { updatedAt: 0, deleted: 0 as const };
 
-const exPress: Exercise = { ...base, id: 'ex-press', name: 'Press de banca', unit: 'lb', load: 'lado', notes: 'Asiento en hoyo 4\nNo al fallo', archived: 0, createdAt: 1 };
-const exConv: Exercise = { ...base, id: 'ex-conv', name: 'Converging Chest Press', unit: 'kg', load: 'normal', notes: '=SUM(A1)', archived: 0, createdAt: 2 };
-const exDom: Exercise = { ...base, id: 'ex-dom', name: 'Dominadas', unit: 'kg', load: 'corporal', notes: '', archived: 1, createdAt: 3 };
+const exPress: Exercise = { ...base, id: 'ex-press', name: 'Press de banca', unit: 'lb', load: 'lado', notes: 'Asiento en hoyo 4\nNo al fallo', archived: 0, unilateral: 0, createdAt: 1 };
+const exConv: Exercise = { ...base, id: 'ex-conv', name: 'Converging Chest Press', unit: 'kg', load: 'normal', notes: '=SUM(A1)', archived: 0, unilateral: 1, createdAt: 2 };
+const exDom: Exercise = { ...base, id: 'ex-dom', name: 'Dominadas', unit: 'kg', load: 'corporal', notes: '', archived: 1, unilateral: 0, createdAt: 3 };
 const routine: Routine = { ...base, id: 'r-push', name: 'Pecho, hombro y tríceps', weekdays: [1, 4], order: 0 };
 const slot: RoutineSlot = { ...base, id: 'sl-1', routineId: 'r-push', order: 0, exerciseIds: ['ex-press', 'ex-conv'], kind: 'normal' };
 const session: Session = { ...base, id: 'ses-1', date: '2026-10-12', routineId: 'r-push', title: '10', notes: '2026-10-15', startedAt: null, finishedAt: 1760300000000, source: 'notas' };
 const sessionFree: Session = { ...base, id: 'ses-2', date: '2026-10-16', routineId: null, title: 'Brazo', notes: '', startedAt: 1760600000000, finishedAt: null, source: 'app' };
 const entry: Entry = { ...base, id: 'en-1', sessionId: 'ses-1', exerciseId: 'ex-press', slotId: null, order: 1, note: '5.5', raw: '1 - 2 | 41kg - 45kg | 10 - 7 - 6', review: 1, reviewReason: 'Series y reps no cuadran' };
 const entry2: Entry = { ...base, id: 'en-2', sessionId: 'ses-1', exerciseId: 'ex-dom', slotId: 'sl-1', order: 2, note: '', raw: '', review: 0, reviewReason: '' };
-const set1: WorkSet = { ...base, id: 'st-1', entryId: 'en-1', sessionId: 'ses-1', exerciseId: 'ex-press', date: '2026-10-12', order: 1, weight: 25, unit: 'lb', load: 'lado', reps: 5.5, weight2: null, reps2: null, seconds: null, done: 1, doubtful: 0 };
-const set2: WorkSet = { ...base, id: 'st-2', entryId: 'en-2', sessionId: 'ses-1', exerciseId: 'ex-dom', date: '2026-10-12', order: 1, weight: -4.5, unit: 'kg', load: 'corporal', reps: 6, weight2: 18, reps2: 4, seconds: 50, done: 0, doubtful: 1 };
+const set1: WorkSet = { ...base, id: 'st-1', entryId: 'en-1', sessionId: 'ses-1', exerciseId: 'ex-press', date: '2026-10-12', order: 1, weight: 25, unit: 'lb', load: 'lado', reps: 5.5, repsR: null, weight2: null, reps2: null, seconds: null, done: 1, doubtful: 0 };
+const set2: WorkSet = { ...base, id: 'st-2', entryId: 'en-2', sessionId: 'ses-1', exerciseId: 'ex-dom', date: '2026-10-12', order: 1, weight: -4.5, unit: 'kg', load: 'corporal', reps: 6, repsR: 5.5, weight2: 18, reps2: 4, seconds: 50, done: 0, doubtful: 1 };
 
 async function seed(dev: Device) {
   await dev.save('exercises', [exPress, exConv, exDom]);
@@ -114,7 +114,7 @@ describe('Code.gs', () => {
     expect(server.logs.join('\n')).toContain(token);
     expect(server.ss.getSheetByName('Series')!.header()).toEqual([...COLUMN_ORDER.sets, '_srv']);
     const formula = String(server.ss.getSheetByName('Resumen')!.get(1, 1));
-    expect(formula).toMatch(/^=QUERY\(Series!A:S, "select A, B, C\+1, D, E, F, G, H, I, J where R = 0 order by A desc, B, C label A 'Fecha', B 'Ejercicio', C\+1 'Serie'/);
+    expect(formula).toMatch(/^=QUERY\(Series!A:T, "select A, B, C\+1, D, E, F, G, H, I, J where R = 0 order by A desc, B, C label A 'Fecha', B 'Ejercicio', C\+1 'Serie'/);
     // Correrlo otra vez no cambia el token ni duplica nada
     server.gs.configurar();
     expect(server.props.get('TOKEN')).toBe(token);
